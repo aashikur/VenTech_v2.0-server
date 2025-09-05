@@ -6,7 +6,6 @@ const mongoose = require("mongoose");
 const { z } = require("zod");
 const admin = require("firebase-admin");
 const path = require("path");
-
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI_PATH;
 
@@ -226,6 +225,7 @@ app.post("/api/v1/auth/add-user", async (req, res) => {
       phone,
       role,
       status,
+      roleRequest,
       loginCount,
       ventech_user,
       frontend_role,
@@ -247,6 +247,7 @@ app.post("/api/v1/auth/add-user", async (req, res) => {
           loginCount: loginCount || 1,
           ventech_user: ventech_user ?? true,
           frontend_role: frontend_role || role || "customer",
+          roleRequest: roleRequest || null,
           shopDetails: shopDetails || null,
         },
       },
@@ -262,40 +263,7 @@ app.post("/api/v1/auth/add-user", async (req, res) => {
 
 
 
-// // app.post("/api/v1/auth/become-merchant", requireAuth, validate(shopRequestSchema), async (req, res) => {
-// //   try {
-// //     if (req.user.role === "merchant")
-// //       return res.status(400).json({ error: "Already a merchant" });
-// //     if (req.user.role === "admin")
-// //       return res.status(400).json({ error: "Admin cannot become merchant" });
-
-// //     const shopDetails = req.body.shopDetails;
-// //     const updated = await User.findByIdAndUpdate(
-// //       req.user._id,
-// //       {
-// //         $set: {
-// //           role: "merchant",
-// //           status: "pending",
-// //           shopDetails,
-// //           updatedAt: new Date(),
-// //         },
-// //       },
-// //       { new: true }
-// //     )
-// //       .select("-passwordHash")
-// //       .lean();
-
-// //     res.json({
-// //       user: updated,
-// //       message: "Merchant request submitted (pending admin approval)",
-// //     });
-// //   } catch (err) {
-// //     console.error("Become merchant error:", err);
-// //     res.status(500).json({ error: "Server error" });
-// //   }
-// // });
-
-// POST /api/v1/auth/request-merchant
+ // ------------------- Request Merchant Role (customar) -------------------
 app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -326,6 +294,56 @@ app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
   }
 });
 
+// Request Merchant Rejected (customar) ------------------
+// PATCH /api/v1/admin/reject-merchant/:id
+app.patch("/api/v1/admin/reject-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!user.roleRequest || user.roleRequest.type !== "merchant") {
+      return res.status(400).json({ message: "No merchant request found" });
+    }
+
+    user.roleRequest.status = "rejected";
+    user.role = "customer"; // revert role to customer
+    await user.save();
+
+    res.json({ message: "Merchant request rejected", user });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 //  -------------------  Get All Users (Admin) -------------------
 
@@ -339,46 +357,109 @@ app.get("/api/v1/admin/users", requireAuth, requireAdmin, async (req, res, next)
   }
 });
 
+// delete user (admin)
+// DELETE a user by ID (Admin only)
+app.delete("/api/v1/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findByIdAndDelete(id);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({ message: "User deleted successfully" });
+  } catch (err) {
+    console.error("Delete user error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 
+// ------------------- Pending Merchant (Admin) -------------------
+// GET /api/v1/admin/pending-merchants
+app.get("/api/v1/admin/pending-merchants", requireAuth,  async (req, res) => {
+  try {
+    const pendingMerchants = await User.find({
+      "roleRequest.type": "merchant",
+      "roleRequest.status": "pending"
+    }).sort({ "roleRequest.requestedAt": -1 });
+    
+    res.status(200).json(pendingMerchants);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ------------------- Approve Merchant (Admin) -------------------
+
+// PATCH /api/v1/admin/approve-merchant/:id
+app.patch("/api/v1/admin/approve-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!user.roleRequest || user.roleRequest.type !== "merchant") {
+      return res.status(400).json({ message: "No merchant request found" });
+    }
+
+    user.roleRequest.status = "approved";
+    user.role = "merchant"; // Convert user role
+    user.status = user.status === "pending" ? "active" : user.status; // activate if pending
+    await user.save();
+
+    res.json({ message: "Merchant approved", user });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 
-// app.post("/api/v1/admin/approve-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
-//   try {
-//     const merchantId = req.params.id;
-//     const user = await User.findById(merchantId);
-//     if (!user) return res.status(404).json({ error: "User not found" });
-//     if (user.role !== "merchant")
-//       return res.status(400).json({ error: "User is not a merchant" });
+//  ------------------- Mailbox Routes -------------------
+// ------------------- POST Mailbox -------------------
+app.post("/api/public/mailbox", async (req, res) => {
+  try {
+    const { name, email, subject, message } = req.body;
 
-//     user.status = "active";
-//     await user.save();
+    if (!name || !email || !subject || !message) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
 
-//     res.json({
-//       user: { ...user.toObject(), passwordHash: undefined },
-//       message: "Merchant approved",
-//     });
-//   } catch (err) {
-//     console.error("Approve merchant error:", err);
-//     res.status(500).json({ error: "Server error" });
-//   }
-// });
+    const mailboxCollection = mongoose.connection.collection("mailbox");
 
-// app.get("/merchant-data", requireAuth, requireMerchant, (req, res) => {
-//   res.json({ secret: "Merchant-only data ✅" });
-// });
+    const result = await mailboxCollection.insertOne({
+      name,
+      email,
+      subject,
+      message,
+      createdAt: new Date(),
+    });
 
-// app.get("/api/v1/admin/pending-merchants", requireAuth, requireAdmin, async (req, res) => {
-//   try {
-//     const pending = await User.find({ role: "merchant", status: "pending" })
-//       .select("-passwordHash")
-//       .lean();
-//     res.json({ merchants: pending });
-//   } catch (err) {
-//     console.error("Pending merchants error:", err);
-//     res.status(500).json({ error: "Server error" });
-//   }
-// });
+    res.status(201).json({ message: "Message saved successfully", id: result.insertedId });
+  } catch (err) {
+    console.error("Mailbox POST error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+// ------------------- GET Mailbox -------------------
+app.get("/api/public/mailbox", async (req, res) => {
+  try {
+    const mailboxCollection = mongoose.connection.collection("mailbox");
+
+    const messages = await mailboxCollection.find({}).sort({ createdAt: -1 }).toArray();
+
+    res.status(200).json(messages);
+  } catch (err) {
+    console.error("Mailbox GET error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
 
 // ----------------- Error Handler -----------------
 app.use((err, _req, res, _next) => {
