@@ -1,503 +1,392 @@
-// ==========================
-// 1. Basic Setup & Imports
-// ==========================
-const dotenv = require("dotenv");
-dotenv.config();
+// index.js - Firebase-auth-aware backend for VenTech
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const mongoose = require("mongoose");
+const { z } = require("zod");
 const admin = require("firebase-admin");
-const serviceAccount = require("./admin-key.json");
+const path = require("path");
 
-// ==========================
-// 2. Firebase Admin Setup
-// ==========================
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI_PATH;
 
-// ==========================
-// 3. Express App & Middleware
-// ==========================
+if (!MONGODB_URI) {
+  throw new Error("Missing MONGODB_URI_PATH in .env");
+}
+
+// ----------------- Firebase Admin Init -----------------
+try {
+  const serviceAccount = require(path.join(__dirname, "admin-key.json")); // <-- load directly
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+  console.log("✅ Firebase Admin initialized with admin-key.json");
+} catch (err) {
+  console.error("❌ Failed to load admin-key.json:", err);
+  process.exit(1);
+}
+
+// ----------------- App + Middleware -----------------
 const app = express();
-const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// ==========================
-// 4. MongoDB Connection
-// ==========================
-const client = new MongoClient(process.env.MONGODB_URI, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
+// ----------------- Mongoose Connect -----------------
+mongoose.set("strictQuery", true);
+mongoose
+  .connect(MONGODB_URI, { dbName: "ventech_db" })
+  .then(() => console.log("✅ Connected to MongoDB"))
+  .catch((err) => {
+    console.error("❌ MongoDB connect error:", err);
+    process.exit(1);
+  });
+
+// ----------------- Schemas & Models -----------------
+const { Schema, model } = mongoose;
+
+const ShopDetailsSchema = new Schema(
+  {
+    shopName: { type: String, trim: true },
+    shopNumber: { type: String, trim: true },
+    shopAddress: { type: String, trim: true },
+    tradeLicense: { type: String, trim: true },
   },
+  { _id: false }
+);
+
+
+const UserSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true, minlength: 2 },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    phone: { type: String, default: null },
+    photoURL: { type: String, default: null },
+    passwordHash: { type: String, default: null }, // optional (firebase handles login)
+    // roleRequest: { type: String, enum: ["merchant", "customer"], default: null }, // e.g., "merchant"
+    roleRequest: {
+      type: {
+        type: String,
+        enum: ["merchant", "customer"],
+        default: null
+      },
+      status: {
+        type: String,
+        enum: ["pending", "approved", "rejected"],
+        default: null
+      },
+      requestedAt: {
+        type: Date,
+        default: Date.now
+      }
+    },
+
+    district: { type: String, default: null },
+    role: { type: String, enum: ["admin", "merchant", "customer"], default: "customer" },
+    status: { type: String, enum: ["active", "pending", "blocked"], default: "active" },
+    shopDetails: { type: ShopDetailsSchema, default: null },
+    loginCount: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
+
+const User = model("User", UserSchema);
+
+// ----------------- Zod Validator -----------------
+const shopRequestSchema = z.object({
+  shopDetails: z
+    .object({
+      shopName: z.string().min(2),
+      shopNumber: z.string().min(1),
+      shopAddress: z.string().min(3),
+      tradeLicense: z.string().optional().nullable(),
+    })
+    .optional()
+    .nullable(),
 });
 
-// ==========================
-// 5. Middleware: Firebase Token Verify
-// ==========================
-const verifyFirebaseToken = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Unauthorized: No token provided" });
-  }
-  const idToken = authHeader.split(" ")[1];
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    req.firebaseUser = decodedToken;
+function validate(schema) {
+  return (req, res, next) => {
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      const details = parsed.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      return res.status(400).json({ error: "Validation failed", details });
+    }
+    req.body = parsed.data;
     next();
-  } catch (error) {
-    return res.status(401).json({ message: "Unauthorized: Invalid token" });
+  };
+}
+
+// ----------------- Auth Middleware -----------------
+const requireAuth = async (req, res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "No token provided" });
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    const email = decoded.email;
+    if (!email) return res.status(401).json({ error: "Token missing email" });
+
+    let user = await User.findOne({ email }).lean();
+    if (!user) {
+      const nameGuess = decoded.name || email.split("@")[0];
+      const created = await User.create({
+        name: nameGuess,
+        email,
+        role: "customer",
+        status: "active",
+        loginCount: 1,
+      });
+      user = created.toObject();
+    } else {
+      await User.updateOne({ _id: user._id }, { $inc: { loginCount: 1 } });
+    }
+
+    req.user = user;
+    req.firebaseAuth = decoded;
+    next();
+  } catch (err) {
+    console.error("Token verify error:", err);
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
-// ==========================
-// 6. Main App Logic
-// ==========================
-async function run() {
+const requireMerchant = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+  if (req.user.role !== "merchant") {
+    return res.status(403).json({ error: "Only merchants allowed" });
+  }
+  if (req.user.status !== "active") {
+    return res.status(403).json({ error: "Merchant account not approved yet" });
+  }
+  next();
+};
+
+const requireAdmin = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+  if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  next();
+};
+
+// ----------------- Routes -----------------
+app.get("/api/v1/health", (_req, res) =>
+  res.json({ ok: true, db: mongoose.connection.name })
+);
+
+// app.post("/api/v1/auth/sync", requireAuth, async (req, res) => {
+//   try {
+//     const user = await User.findOne({ email: req.user.email })
+//       .select("-passwordHash")
+//       .lean();
+//     return res.json({ user, message: "User synced" });
+//   } catch (err) {
+//     console.error("Sync error:", err);
+//     return res.status(500).json({ error: "Server error" });
+//   }
+// });
+
+app.get("/api/v1/auth/me", requireAuth, async (req, res) => {
+  res.json({ user: req.user });
+});
+
+// app.get("/get-user-by-email", async (req, res) => {
+//   const { email } = req.query;
+//   const user = await User.findOne({ email });
+//   if (!user) return res.status(404).json({ message: "User not found" });
+//   res.json(user);
+// });
+
+// // PATCH /update-profile
+// app.patch("/api/v1/auth/update-profile", requireAuth, async (req, res) => {
+//   try {
+//     const email = req.user.email;
+//     const { name, photoURL, phone, district, upazila, shopDetails } = req.body;
+
+//     const updatedUser = await User.findOneAndUpdate(
+//       { email },
+//       { name, photoURL, phone, district, upazila, shopDetails },
+//       { new: true, runValidators: true }
+//     );
+
+//     if (!updatedUser) return res.status(404).json({ message: "User not found" });
+
+//     res.json(updatedUser);
+//   } catch (err) {
+//     res.status(500).json({ message: "Server error", error: err.message });
+//   }
+// });
+
+app.post("/api/v1/auth/add-user", async (req, res) => {
   try {
-    // await client.connect();
-    const db = client.db("bloodaid_db");
-    const userCollection = db.collection("users");
-    const donationRequestsCollection = db.collection("donationRequests");
-    const blogsCollection = db.collection("blogs");
-    const fundingsCollection = db.collection("fundings");
-    const contactsCollection = db.collection("contacts");
+    const {
+      name,
+      email,
+      phone,
+      role,
+      status,
+      loginCount,
+      ventech_user,
+      frontend_role,
+      shopDetails,
+    } = req.body;
 
-    // ====================================================================================
-    // ====================================================================================
-    // ====================================================================================
-    // ====================================================================================
+    console.log("Incoming user data:", req.body);
+
+    // Upsert: create new or update existing
+    const updatedUser = await User.findOneAndUpdate(
+      { email }, // filter by email
+      {
+        $set: {
+          name,
+        photoURL: "https://cdn-icons-png.flaticon.com/128/3135/3135715.png",
+          phone: phone || null,
+          role: role || "customer",
+          status: status || "active",
+          loginCount: loginCount || 1,
+          ventech_user: ventech_user ?? true,
+          frontend_role: frontend_role || role || "customer",
+          shopDetails: shopDetails || null,
+        },
+      },
+      { new: true, upsert: true } // new: return updated doc, upsert: create if not exists
+    );
+
+    res.status(201).json({ user: updatedUser, message: "User created or updated successfully" });
+  } catch (err) {
+    console.error("Add-user error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
 
-    // ========== Admin Middleware ==========
-    const verifyAdmin = async (req, res, next) => {
-      const user = await userCollection.findOne({
-        email: req.firebaseUser.email,
-      });
 
-      if (user.role === "admin") {
-        next();
-      } else {
-        res.status(403).send({ msg: "unauthorized" });
-      }
+// // app.post("/api/v1/auth/become-merchant", requireAuth, validate(shopRequestSchema), async (req, res) => {
+// //   try {
+// //     if (req.user.role === "merchant")
+// //       return res.status(400).json({ error: "Already a merchant" });
+// //     if (req.user.role === "admin")
+// //       return res.status(400).json({ error: "Admin cannot become merchant" });
+
+// //     const shopDetails = req.body.shopDetails;
+// //     const updated = await User.findByIdAndUpdate(
+// //       req.user._id,
+// //       {
+// //         $set: {
+// //           role: "merchant",
+// //           status: "pending",
+// //           shopDetails,
+// //           updatedAt: new Date(),
+// //         },
+// //       },
+// //       { new: true }
+// //     )
+// //       .select("-passwordHash")
+// //       .lean();
+
+// //     res.json({
+// //       user: updated,
+// //       message: "Merchant request submitted (pending admin approval)",
+// //     });
+// //   } catch (err) {
+// //     console.error("Become merchant error:", err);
+// //     res.status(500).json({ error: "Server error" });
+// //   }
+// // });
+
+// POST /api/v1/auth/request-merchant
+app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (user.roleRequest?.type === "merchant" && user.roleRequest?.status === "pending") {
+      return res.status(400).json({ message: "Merchant request already pending" });
+    }
+
+
+    // Only update roleRequest and status
+    // Update roleRequest as an object
+    user.roleRequest = {
+      type: "merchant",
+      status: "pending",
+      requestedAt: new Date(),
     };
 
-    // ========== Contact Us API ========== 
-    app.post("/contacts", async (req, res) => {
-      const contact = req.body;
-      contact.createdAt = new Date();
-      const result = await contactsCollection.insertOne(contact);
-      res.send(result);
-    });
+    // Keep main account active while waiting
+    user.status = "active";
+    await user.save();
 
-    app.get("/contacts", async (req, res) => {
-      const contacts = await contactsCollection.find({}).sort({ createdAt: -1 }).toArray();
-      res.send(contacts);
-    });
-
-    // ========== Donor Search APIs ==========
-    // Option-based search (blood group, district, upazila)
-    app.get("/search-donors", async (req, res) => {
-      const { bloodGroup, district, upazila } = req.query;
-
-      
-      // Custom Fixed for (+/- issues)
-      //------------------------------------------------------------
-      let lastFixed = bloodGroup.slice(-1);
-      const sym = (lastFixed == 'p') ? '+' : '-';
-      let FixedBlood = bloodGroup.slice(0, -1) + sym;
-      //------------------------------------------------------------
-      // console.log( "✅ Fixed Custom:",FixedBlood, sym);
-
-
-      const query = {
-        bloodGroup: FixedBlood,
-        district,
-        upazila,
-        status: "active",
-        role: "donor"
-      };
-      const donors = await userCollection.find(query).toArray();
-      console.log("Search Query:", query, "\nFound Donors:", donors.length);
-
-      res.send(donors);
-    });
-
-    // Dynamic search (name, bloodGroup, district, upazila)
-    app.get("/search-donors-dynamic", async (req, res) => {
-      const { query } = req.query;
-      const searchRegex = new RegExp(query, "i");
-      const donors = await userCollection.find({
-        $or: [
-          { name: searchRegex },
-          { bloodGroup: searchRegex },
-          { district: searchRegex },
-          { upazila: searchRegex }
-        ],
-        status: "active",
-        role: "donor"
-      }).toArray();
-      res.send(donors);
-    });
-
-    // ========== User Routes ==========
-    // Add or update user (on registration/login)
-    app.post("/add-user", async (req, res) => {
-      const userData = req.body;
-      const find_result = await userCollection.findOne({ email: userData.email });
-      if (find_result) {
-        userCollection.updateOne(
-          { email: userData.email },
-          { $inc: { loginCount: 1 } }
-        );
-        res.send({ msg: "user already exist" });
-      } else {
-        const result = await userCollection.insertOne({ ...userData, status: "active" });
-        res.send(result);
-      }
-    });
-
-    // Get user role/status (for frontend auth)
-    app.get("/get-user-role", verifyFirebaseToken, async (req, res) => {
-      const user = await userCollection.findOne({
-        email: req.firebaseUser.email,
-      });
-      res.send({ msg: "OOKK", role: user.role, status: user.status, UserCollection_Data: user });
-    });
-
-    // Get all users (admin only)
-    app.get("/get-users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const users = await userCollection
-        .find({ email: { $ne: req.firebaseUser.email } })
-        .toArray();
-      res.send(users);
-    });
-
-    // Get user by email (for profile/dashboard)
-    app.get("/get-user-by-email", async (req, res) => {
-      const user = await userCollection.findOne({ email: req.query.email });
-      res.send(user);
-    });
-// Update user by email (admin only)
-app.patch("/user/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-  const { email } = req.params;
-  const updateData = req.body;
-  try {
-    const result = await userCollection.updateOne(
-      { email },
-      { $set: updateData }
-    );
-    res.send(result);
+    res.json({ message: "Request sent successfully", user });
   } catch (err) {
-    res.status(500).send({ error: "Failed to update user" });
+    console.error("Merchant request error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
-    // Get user by id (for admin view)
-    app.get("/get-user/:id", async (req, res) => {
-      const user = await userCollection.findOne({ _id: new ObjectId(req.params.id) });
-      res.send(user);
-    });
-    // Delete a user by email (admin only)
-    app.delete("/user/:email", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const { email } = req.params;
-      try {
-        const result = await userCollection.deleteOne({ email });
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to delete user" });
-      }
-    });
-    // Update user profile (profile edit)
-    app.patch("/update-user", verifyFirebaseToken, async (req, res) => {
-      const updateData = req.body;
-      const email = req.firebaseUser.email;
-      try {
-        const result = await userCollection.updateOne(
-          { email },
-          { $set: updateData }
-        );
-        const updatedUser = await userCollection.findOne({ email });
-        res.send({ success: true, updatedUser, modifiedCount: result.modifiedCount });
-      } catch (err) {
-        res.status(500).send({ error: "Failed to update user" });
-      }
-    });
-
-    // Update user role (admin only)
-    app.patch("/update-role", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const { email, role } = req.body;
-      const result = await userCollection.updateOne(
-        { email },
-        { $set: { role } }
-      );
-      res.send(result);
-    });
-
-    // Update user status (block/unblock)
-    app.patch("/update-status", async (req, res) => {
-      const { email, status } = req.body;
-      const result = await userCollection.updateOne(
-        { email },
-        { $set: { status } }
-      );
-      res.send(result);
-    });
-
-    // ========== Blog Routes ==========
-    app.post("/blogs", async (req, res) => {
-      const blog = req.body;
-      blog.status = "draft";
-      blog.createdAt = new Date();
-      blog.updatedAt = new Date();
-      const result = await blogsCollection.insertOne(blog);
-      res.send(result);
-    });
-    app.get("/blogs", async (req, res) => {
-      const blogs = await blogsCollection.find({}).sort({ createdAt: -1 }).toArray();
-      res.send(blogs);
-    });
-// Publish/Unpublish blog (admin only)
-app.patch("/blogs/:id/publish", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body; // "published" or "draft"
-  const result = await blogsCollection.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: { status, updatedAt: new Date() } }
-  );
-  res.send(result);
-});
-
-// Delete blog (admin only)
-app.delete("/blogs/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-  const result = await blogsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
-  res.send(result);
-});
-
-    // ========== Donation Request Routes ==========
-    // Public donation requests (all status)
-    app.get("/public-donation-requests", async (req, res) => {
-      const userEmail = req.query.email; // frontend থেকে পাঠাও (optional)
-      let query = {};
-      if (userEmail) {
-        query.requesterEmail = { $ne: userEmail };
-      }
-      const requests = await donationRequestsCollection
-        .find(query)
-        .sort({ _id: -1 })
-        .toArray();
-      res.send(requests);
-    });
-
-    // Respond to a donation request (mark as in-progress)
-    app.patch("/donation-request/:id/respond", verifyFirebaseToken, async (req, res) => {
-      const { id } = req.params;
-      const donorInfo = {
-        name: req.firebaseUser.name || req.firebaseUser.displayName,
-        email: req.firebaseUser.email,
-      };
-      const result = await donationRequestsCollection.updateOne(
-        { _id: new ObjectId(id), donationStatus: "pending" },
-        { $set: { donationStatus: "inprogress", donorInfo } }
-      );
-      res.send(result);
-    });
-
-    // Create a new donation request
-    app.post("/donation-request", verifyFirebaseToken, async (req, res) => {
-      const request = req.body;
-      request.donationStatus = "pending"; // default
-      const result = await donationRequestsCollection.insertOne(request);
-      res.send(result);
-    });
-
-    // Admin/all user can see all requests
-    app.get("/all-donation-requests", async (req, res) => {
-      const requests = await donationRequestsCollection
-        .find({})
-        .sort({ _id: -1 })
-        .toArray();
-      res.send(requests);
-    });
-
-    // Get all donation requests for a user (with optional limit)
-    app.get("/my-donation-requests", async (req, res) => {
-      const { email, limit } = req.query;
-      const query = { requesterEmail: email };
-      let cursor = donationRequestsCollection.find(query).sort({ _id: -1 });
-      if (limit) cursor = cursor.limit(parseInt(limit));
-      const requests = await cursor.toArray();
-      res.send(requests);
-    });
-
-    // Get a single donation request by id
-    app.get("/donation-request/:id", async (req, res) => {
-      const id = req.params.id;
-      const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
-      res.send(request);
-    });
-
-    // Update a donation request (edit)
-    app.patch("/donation-request/:id", async (req, res) => {
-      const { id } = req.params;
-      const updateData = req.body;
-      console.log("Update Data:", updateData);
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).send({ error: "Invalid ObjectId format" });
-      }
-      try {
-        const result = await donationRequestsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: updateData }
-        );
-        console.log("Update Result:", result);
-        res.send(result);
-      } catch (err) {
-        console.error("Update Error:", err);
-        res.status(500).send({ error: "Failed to update donation request." });
-      }
-    });
-
-    // // Delete a donation request
-    // app.delete("/donation-request/:id", verifyFirebaseToken, async (req, res) => {
-    //   const { id } = req.params;
-    //   try {
-    //     const result = await donationRequestsCollection.deleteOne({ _id: new ObjectId(id) });
-    //     res.send(result);
-    //   } catch (err) {
-    //     res.status(500).send({ error: "Failed to delete donation request" });
-    //   }
-    // });
-
-    // ========== Admin Dashboard Stats ==========
-    app.get("/admin-dashboard-stats", async (req, res) => {
-      const userCount = await userCollection.countDocuments();
-      const requestCount = await donationRequestsCollection.countDocuments();
-      
-      const blogsCount = await blogsCollection.countDocuments();
-      const blogsCountDraft = await blogsCollection.countDocuments({ status: "draft" });
-      const blogsCountPublished = await blogsCollection.countDocuments({ status: "published" });
-
-      const contactsCount = await contactsCollection.countDocuments();
-
-      
-      const fundingsCount = await fundingsCollection.countDocuments();
-      const fundingTotalAmount = await fundingsCollection.aggregate([
-        { $group: { _id: null, total: { $sum: "$amount" } } }
-      ]).toArray();
-
-      res.send({
-        totalUsers: userCount,
-        totalRequest: requestCount,
-        totalBlogs: blogsCount,
-        totalBlogsDraft: blogsCountDraft,
-        totalBlogsPublished: blogsCountPublished,
-        totalContacts: contactsCount,
-        totalFundings: fundingsCount,
-        totalFundingAmount: fundingTotalAmount[0]?.total || 0
-
-      });
-    });
-
-    // Delete a donation request by id
-    app.delete("/donation-request/:id", async (req, res) => {
-      const { id } = req.params;
-      try {
-        const result = await donationRequestsCollection.deleteOne({ _id: new ObjectId(id) });
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to delete donation request" });
-      }
-    });
-
-    // ========== Payment (Stripe) ==========
-    app.post("/create-payment-intent", async (req, res) => {
-      const { amount } = req.body;
-      try {
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: amount * 100, // in cents
-          currency: "usd",
-          payment_method_types: ["card"],
-        });
-        res.send({
-          clientSecret: paymentIntent.client_secret,
-        });
-      } catch (error) {
-        res.status(500).json({ error: error.message });
-      }
-    });
 
 
-    // ALL Funding Routes ===================================================
-    // ======================================================================
-    // ==========================
-    // Funding API Routes
-    // ==========================
-
-    // 1. Save Funding Record (Stripe payment success হলে call করবে)
-    app.post("/fundings", async (req, res) => {
-      const funding = req.body;
-      funding.fundingDate = new Date();
-      const result = await fundingsCollection.insertOne(funding);
-      console.log("Funding record saved:", result);
-      console.log("Funding Data:", funding);
-      res.send(result);
-    });
-
-    // 2. Get All Fundings (pagination support)
-    app.get("/fundings", async (req, res) => {
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 10;
-      const skip = (page - 1) * limit;
-      const fundings = await fundingsCollection.find({})
-        .sort({ fundingDate: -1 })
-        .skip(skip)
-        .limit(limit)
-        .toArray();
-      const total = await fundingsCollection.countDocuments();
-      res.send({ fundings, total });
-    });
-
-    // 3. Get Total Fundings (stat card/show total)
-    app.get("/fundings/total", async (req, res) => {
-      const result = await fundingsCollection.aggregate([
-        { $group: { _id: null, total: { $sum: "$amount" } } }
-      ]).toArray();
-      res.send({ totalFunding: result[0]?.total || 0 });
-    });
+//  -------------------  Get All Users (Admin) -------------------
 
 
-
-
-    console.log("connected to MongoDB");
-  } finally {
-    // Optional: cleanup
+app.get("/api/v1/admin/users", requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const users = await User.find({ role: { $ne: "admin" } }).sort({ createdAt: -1 });
+    res.status(200).json(users);
+  } catch (err) {
+    next(err); // handled by global error handler
   }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-run().catch(console.dir);
-
-// ==========================
-// 7. Root Route & Server Start
-// ==========================
-app.get("/", async (req, res) => {
-  res.send({ msg: "VenTech ~ Server is Running Backend Technology" });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is listening on port ${PORT}`);
+
+
+
+
+// app.post("/api/v1/admin/approve-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
+//   try {
+//     const merchantId = req.params.id;
+//     const user = await User.findById(merchantId);
+//     if (!user) return res.status(404).json({ error: "User not found" });
+//     if (user.role !== "merchant")
+//       return res.status(400).json({ error: "User is not a merchant" });
+
+//     user.status = "active";
+//     await user.save();
+
+//     res.json({
+//       user: { ...user.toObject(), passwordHash: undefined },
+//       message: "Merchant approved",
+//     });
+//   } catch (err) {
+//     console.error("Approve merchant error:", err);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// });
+
+// app.get("/merchant-data", requireAuth, requireMerchant, (req, res) => {
+//   res.json({ secret: "Merchant-only data ✅" });
+// });
+
+// app.get("/api/v1/admin/pending-merchants", requireAuth, requireAdmin, async (req, res) => {
+//   try {
+//     const pending = await User.find({ role: "merchant", status: "pending" })
+//       .select("-passwordHash")
+//       .lean();
+//     res.json({ merchants: pending });
+//   } catch (err) {
+//     console.error("Pending merchants error:", err);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// });
+
+// ----------------- Error Handler -----------------
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Server error" });
 });
+
+// ----------------- Start Server -----------------
+app.listen(PORT, () =>
+  console.log(`🚀 VenTech server running at http://localhost:${PORT}`)
+);

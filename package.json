@@ -1,22 +1,24 @@
 {
-  "name": "uddyog-server",
+  "name": "ventech_v2.1-server",
   "version": "1.0.0",
-  "description": "",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "node index.js"
+    "start": "nodemon index.js"
   },
-  "keywords": [],
   "author": "",
   "license": "ISC",
+  "description": "",
   "dependencies": {
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.5.0",
+    "dotenv": "^17.2.1",
     "express": "^5.1.0",
-    "firebase-admin": "^13.4.0",
+    "firebase-admin": "^13.5.0",
     "jsonwebtoken": "^9.0.2",
-    "mongodb": "^6.16.0",
-    "stripe": "^18.3.0"
+    "mongodb": "^6.19.0",
+    "mongoose": "^8.18.0",
+    "nodemon": "^3.1.10",
+    "zod": "^4.1.5"
   }
 }
