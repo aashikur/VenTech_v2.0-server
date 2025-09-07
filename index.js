@@ -423,7 +423,32 @@ app.get("/api/public/mailbox", async (req, res) => {
   }
 });
 
-// =============================================================================
+
+
+
+// Category model
+const Category = mongoose.model(
+  "Category",
+  new mongoose.Schema({
+    name: { type: String, required: true },
+    image: { type: String },
+  }),
+  "categories" // this ensures it uses the 'categories' collection
+);
+
+// GET all categories
+app.get("/api/v1/categories", async (req, res) => {
+  try {
+    const categories = await Category.find({});
+    res.json(categories);
+  } catch (err) {
+    console.error("Failed to fetch categories:", err);
+    res.status(500).json({ message: "Failed to fetch categories" });
+  }
+});
+
+
+
 // ====================== Products =========================================
 
 // ----------------- Product Schema -----------------
@@ -467,7 +492,7 @@ app.post("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
       quantity,
     } = req.body;
 
-    console.log("Add Product Payload:", req.body);
+    // console.log("Add Product Payload:", req.body);
 
     const stockStatus = quantity > 0 ? "in-stock" : "out-of-stock";
 
@@ -506,7 +531,7 @@ app.post("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
 // GET all products (for merchant view)
 app.get("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
   try {
-    const products = await Product.find({ merchantId: req.user._id }); // only own products
+    const products = await Product.find(); // only own products
     res.json(products);
   } catch (err) {
     console.error("Error fetching products:", err);
@@ -593,9 +618,86 @@ app.post("/api/v1/products/:id/request", requireAuth, requireMerchant, async (re
 
 
 
+// =============================== Blog ==================================
+
+// ----------------------
+// Blog Schema + Model
+// ----------------------
+const blogSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true },
+    thumbnail: { type: String },
+    content: { type: String, required: true },
+    author: { type: String },
+    authorPhoto: { type: String },
+    status: { type: String, enum: ["draft", "published"], default: "draft" },
+    category: { type: String },
+  },
+  { timestamps: true }
+);
+
+const Blog = mongoose.model("Blog", blogSchema);
+
+// ----------------------
+// Blog Routes
+// ----------------------
+
+// Get all blogs
+app.get("/api/v1/blogs", async (req, res) => {
+  try {
+    const blogs = await Blog.find().sort({ createdAt: -1 });
+    res.json(blogs);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch blogs" });
+  }
+});
+
+// Get single blog by ID
+app.get("/api/v1/blogs/:id", async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) return res.status(404).json({ message: "Blog not found" });
+    res.json(blog);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch blog" });
+  }
+});
 
 
 
+
+// // Create blog
+// app.post("/api/v1/blogs", async (req, res) => {
+//   try {
+//     const blog = new Blog(req.body);
+//     await blog.save();
+//     res.status(201).json(blog);
+//   } catch (err) {
+//     res.status(400).json({ message: "Failed to create blog", error: err.message });
+//   }
+// });
+
+// // Update blog
+// app.put("/api/v1/blogs/:id", async (req, res) => {
+//   try {
+//     const blog = await Blog.findByIdAndUpdate(req.params.id, req.body, { new: true });
+//     if (!blog) return res.status(404).json({ message: "Blog not found" });
+//     res.json(blog);
+//   } catch (err) {
+//     res.status(400).json({ message: "Failed to update blog" });
+//   }
+// });
+
+// // Delete blog
+// app.delete("/api/v1/blogs/:id", async (req, res) => {
+//   try {
+//     const blog = await Blog.findByIdAndDelete(req.params.id);
+//     if (!blog) return res.status(404).json({ message: "Blog not found" });
+//     res.json({ message: "Blog deleted successfully" });
+//   } catch (err) {
+//     res.status(500).json({ message: "Failed to delete blog" });
+//   }
+// });
 
 
 
