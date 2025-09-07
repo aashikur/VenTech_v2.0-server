@@ -426,7 +426,7 @@ app.get("/api/public/mailbox", async (req, res) => {
 
 
 
-// Category model
+// Category model ============================================
 const Category = mongoose.model(
   "Category",
   new mongoose.Schema({
@@ -447,6 +447,42 @@ app.get("/api/v1/categories", async (req, res) => {
   }
 });
 
+// ----------------- Add New Category -----------------
+app.post("/api/v1/categories", async (req, res) => {
+  try {
+    const { name, image } = req.body;
+    if (!name) return res.status(400).json({ message: "Category name is required" });
+
+    const newCategory = new Category({ name, image: image || null });
+    await newCategory.save();
+
+    res.status(201).json({ success: true, message: "Category created", category: newCategory });
+  } catch (err) {
+    console.error("Failed to add category:", err);
+    res.status(500).json({ message: "Failed to add category" });
+  }
+});
+
+// ----------------- Update Category (name or image) -----------------
+app.patch("/api/v1/categories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, image } = req.body;
+
+    const category = await Category.findById(id);
+    if (!category) return res.status(404).json({ message: "Category not found" });
+
+    if (name) category.name = name;
+    if (image) category.image = image;
+
+    await category.save();
+
+    res.json({ success: true, message: "Category updated", category });
+  } catch (err) {
+    console.error("Failed to update category:", err);
+    res.status(500).json({ message: "Failed to update category" });
+  }
+});
 
 
 // ====================== Products =========================================
