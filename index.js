@@ -174,48 +174,12 @@ app.get("/api/v1/health", (_req, res) =>
   res.json({ ok: true, db: mongoose.connection.name })
 );
 
-// app.post("/api/v1/auth/sync", requireAuth, async (req, res) => {
-//   try {
-//     const user = await User.findOne({ email: req.user.email })
-//       .select("-passwordHash")
-//       .lean();
-//     return res.json({ user, message: "User synced" });
-//   } catch (err) {
-//     console.error("Sync error:", err);
-//     return res.status(500).json({ error: "Server error" });
-//   }
-// });
+
 
 app.get("/api/v1/auth/me", requireAuth, async (req, res) => {
   res.json({ user: req.user });
 });
 
-// app.get("/get-user-by-email", async (req, res) => {
-//   const { email } = req.query;
-//   const user = await User.findOne({ email });
-//   if (!user) return res.status(404).json({ message: "User not found" });
-//   res.json(user);
-// });
-
-// // PATCH /update-profile
-// app.patch("/api/v1/auth/update-profile", requireAuth, async (req, res) => {
-//   try {
-//     const email = req.user.email;
-//     const { name, photoURL, phone, district, upazila, shopDetails } = req.body;
-
-//     const updatedUser = await User.findOneAndUpdate(
-//       { email },
-//       { name, photoURL, phone, district, upazila, shopDetails },
-//       { new: true, runValidators: true }
-//     );
-
-//     if (!updatedUser) return res.status(404).json({ message: "User not found" });
-
-//     res.json(updatedUser);
-//   } catch (err) {
-//     res.status(500).json({ message: "Server error", error: err.message });
-//   }
-// });
 
 app.post("/api/v1/auth/add-user", async (req, res) => {
   try {
@@ -459,6 +423,194 @@ app.get("/api/public/mailbox", async (req, res) => {
   }
 });
 
+// =============================================================================
+// ====================== Products =========================================
+
+// ----------------- Product Schema -----------------
+const ProductSchema = new Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true },
+    category: { type: String, required: true },
+        categoryImage: { type: String, default: null }, // <-- NEW FIELD
+
+    images: [{ type: String, required: true }],
+    retailPrice: { type: Number, required: true },
+    merchantPrice: { type: Number, required: true },
+    quantity: { type: Number, required: true, min: 0 },
+    stockStatus: {
+      type: String,
+      enum: ["in-stock", "out-of-stock"],
+      default: "in-stock",
+    },
+    merchantId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  },
+  { timestamps: true }
+);
+
+const Product = model("Product", ProductSchema);
+
+
+
+// ------------------- Create Product (Merchant) -----------------
+// ----------------- Product Routes -----------------
+app.post("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
+  try {
+    const {
+      title,
+      description,
+      category,
+      categoryImage,
+      images,
+      retailPrice,
+      merchantPrice,
+      quantity,
+    } = req.body;
+
+    console.log("Add Product Payload:", req.body);
+
+    const stockStatus = quantity > 0 ? "in-stock" : "out-of-stock";
+
+    const newProduct = new Product({
+      title,
+      description,
+      category,
+      categoryImage: categoryImage || null,
+      images,
+      retailPrice,
+      merchantPrice,
+      quantity,
+      stockStatus,
+      merchantId: req.user._id, // from requireAuth
+    });
+
+    await newProduct.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Product added successfully",
+      product: newProduct,
+    });
+  } catch (err) {
+    console.error("❌ Add Product Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add product",
+      error: err.message,
+    });
+  }
+});
+
+
+// ------------ Get all product Marchent ---------------------------
+// GET all products (for merchant view)
+app.get("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
+  try {
+    const products = await Product.find({ merchantId: req.user._id }); // only own products
+    res.json(products);
+  } catch (err) {
+    console.error("Error fetching products:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
+
+
+// ----------------- Get My Products -----------------
+app.get("/api/v1/products/my", requireAuth, requireMerchant, async (req, res) => {
+  try {
+    const myProducts = await Product.find({ merchantId: req.user._id });
+    res.json({ success: true, products: myProducts });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Failed to fetch products" });
+  }
+});
+
+// ----------------- Update Stock (Increment / Decrement) -----------------
+app.patch("/api/v1/products/:id/update-stock", requireAuth, requireMerchant, async (req, res) => {
+  try {
+    const { quantity } = req.body; // new quantity
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (product.merchantId.toString() !== req.user._id.toString())
+      return res.status(403).json({ success: false, message: "Not authorized" });
+
+    product.quantity = quantity;
+    product.stockStatus = quantity > 0 ? "in-stock" : "out-of-stock";
+    await product.save();
+
+    res.json({ success: true, message: "Stock updated", product });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
+// ----------------- Stock Out -----------------
+app.patch("/api/v1/products/:id/stock-out", requireAuth, requireMerchant, async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (product.merchantId.toString() !== req.user._id.toString())
+      return res.status(403).json({ success: false, message: "Not authorized" });
+
+    product.quantity = 0;
+    product.stockStatus = "out-of-stock";
+    await product.save();
+
+    res.json({ success: true, message: "Product marked as out of stock", product });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
+// ----------------- Request Other Merchant Product -----------------
+app.post("/api/v1/products/:id/request", requireAuth, requireMerchant, async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (product.merchantId.toString() === req.user._id.toString())
+      return res.status(400).json({ success: false, message: "Cannot request your own product" });
+
+    // You can implement saving request to DB here if needed
+    res.json({ success: true, message: "Product request sent" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 // ----------------- Error Handler -----------------
@@ -466,6 +618,7 @@ app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ error: "Server error" });
 });
+
 
 // ----------------- Start Server -----------------
 app.listen(PORT, () =>
