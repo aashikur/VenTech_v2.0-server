@@ -576,17 +576,17 @@ app.get("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
 });
 
 
-
-// ----------------- Get My Products -----------------
-app.get("/api/v1/products/my", requireAuth, requireMerchant, async (req, res) => {
+// GET all products (public view)
+app.get("/api/v1/products/public", async (req, res) => {
   try {
-    const myProducts = await Product.find({ merchantId: req.user._id });
-    res.json({ success: true, products: myProducts });
+    const products = await Product.find(); // get all products, no auth required
+    res.json(products); // return as array directly
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Failed to fetch products" });
+    console.error("Error fetching public products:", err);
+    res.status(500).json({ message: "Failed to fetch products" });
   }
 });
+
 
 // ----------------- Update Stock (Increment / Decrement) -----------------
 app.patch("/api/v1/products/:id/update-stock", requireAuth, requireMerchant, async (req, res) => {
