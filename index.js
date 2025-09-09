@@ -586,6 +586,19 @@ app.get("/api/v1/products/public", async (req, res) => {
     res.status(500).json({ message: "Failed to fetch products" });
   }
 });
+// GET all products (public view)
+app.get("/api/v1/products/:id", async (req, res) => {
+  try { 
+    const params = req.params.id;
+    console.log("Product ID:", params);
+    const product = await Product.findById(params);
+    // const products = await Product.find(); // get all products, no auth required
+    res.json(product); // return as array directly
+  } catch (err) {
+    console.error("Error fetching public products:", err);
+    res.status(500).json({ message: "Failed to fetch products" });
+  }
+});
 
 
 // ----------------- Update Stock (Increment / Decrement) -----------------
