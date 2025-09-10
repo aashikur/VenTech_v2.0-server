@@ -565,7 +565,7 @@ app.post("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
 
 // ------------ Get all product Marchent ---------------------------
 // GET all products (for merchant view)
-app.get("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
+app.get("/api/v1/products", requireAuth, async (req, res) => {
   try {
     const products = await Product.find(); // only own products
     res.json(products);
@@ -657,12 +657,56 @@ app.post("/api/v1/products/:id/request", requireAuth, requireMerchant, async (re
 });
 
 
+// Edit Products (Merchant or Admin)
+app.patch("/api/v1/products/:id/edit", requireAuth, async (req, res) => {
+  try {
+    const { title, images, category, retailPrice, merchantPrice, quantity } = req.body;
 
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
 
+    // Allow update if merchant owns it OR user is admin
+    if (product.merchantId.toString() !== req.user._id.toString() && req.user.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Not authorized" });
+    }
 
+    if (title) product.title = title;
+    if (images) product.images = images;
+    if (category) product.category = category;
+    if (retailPrice) product.retailPrice = retailPrice;
+    if (merchantPrice) product.merchantPrice = merchantPrice;
+    if (quantity !== undefined) {
+      product.quantity = quantity;
+      product.stockStatus = quantity > 0 ? "in-stock" : "out-of-stock";
+    }
 
+    await product.save();
 
+    res.json({ success: true, message: "Product updated successfully", product });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
 
+// Delete Product (Merchant or Admin)
+app.delete("/api/v1/products/:id", requireAuth, async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+
+    if (product.merchantId.toString() !== req.user._id.toString() && req.user.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Not authorized" });
+    }
+
+    await product.deleteOne();
+
+    res.json({ success: true, message: "Product deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+});
 
 
 
