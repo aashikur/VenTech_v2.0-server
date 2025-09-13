@@ -286,9 +286,26 @@ app.patch("/api/v1/admin/reject-merchant/:id", requireAuth, requireAdmin, async 
 
 
 
+// Update User Profile (Auth)
+app.patch("/api/v1/auth/update-profile", requireAuth , async (req, res) => {
+  try {
+    const { name, phone, district, shopDetails } = req.body;
 
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "User not found" });
 
+    user.name = name || user.name;
+    user.phone = phone || user.phone;
+    user.district = district || user.district;
+    user.shopDetails = shopDetails || user.shopDetails;
 
+    await user.save();
+    res.json({ message: "Profile updated successfully", user });
+  } catch (err) {
+    console.error("Update profile error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 
 
