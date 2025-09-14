@@ -691,9 +691,9 @@ app.use((err, _req, res, _next) => {
 });
 
 // ----------------- Start Server -----------------
-app.listen(PORT, () =>
-  console.log(`🚀 VenTech server running at http://localhost:${PORT}`)
-);
+// app.listen(PORT, () =>
+//   console.log(`🚀 VenTech server running at http://localhost:${PORT}`)
+// );
 
 
  
