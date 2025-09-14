@@ -514,59 +514,87 @@ app.patch("/api/v1/products/:id/update-stock", requireAuth, requireMerchant, asy
 
 
 
-
-
-
-
-
-
 // ----------------- Stock Out -----------------
-app.patch("/api/v1/products/:id/stock-out", requireAuth, requireMerchant, async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
-    if (product.merchantId.toString() !== req.user._id.toString())
-      return res.status(403).json({ success: false, message: "Not authorized" });
+app.patch(
+  "/api/v1/products/:id/stock-out",
+  requireAuth,
+  requireMerchant,
+  async (req, res) => {
+    try {
+      const product = await Product.findById(req.params.id);
+      if (!product)
+        return res
+          .status(404)
+          .json({ success: false, message: "Product not found" });
 
-    product.quantity = 0;
-    product.stockStatus = "out-of-stock";
-    await product.save();
+      if (product.merchantId.toString() !== req.user._id.toString())
+        return res
+          .status(403)
+          .json({ success: false, message: "Not authorized" });
 
-    res.json({ success: true, message: "Product marked as out of stock", product });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Server Error" });
+      product.quantity = 0;
+      product.stockStatus = "out-of-stock";
+      await product.save();
+
+      res.json({
+        success: true,
+        message: "Product marked as out of stock",
+        product,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ success: false, message: "Server Error" });
+    }
   }
-});
+);
 
 // ----------------- Request Other Merchant Product -----------------
-app.post("/api/v1/products/:id/request", requireAuth, requireMerchant, async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
-    if (product.merchantId.toString() === req.user._id.toString())
-      return res.status(400).json({ success: false, message: "Cannot request your own product" });
+app.post(
+  "/api/v1/products/:id/request",
+  requireAuth,
+  requireMerchant,
+  async (req, res) => {
+    try {
+      const product = await Product.findById(req.params.id);
+      if (!product)
+        return res
+          .status(404)
+          .json({ success: false, message: "Product not found" });
 
-    // You can implement saving request to DB here if needed
-    res.json({ success: true, message: "Product request sent" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Server Error" });
+      if (product.merchantId.toString() === req.user._id.toString())
+        return res
+          .status(400)
+          .json({ success: false, message: "Cannot request your own product" });
+
+      // Optionally: save request to DB here
+      res.json({ success: true, message: "Product request sent" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ success: false, message: "Server Error" });
+    }
   }
-});
+);
 
-
-// Edit Products (Merchant or Admin)
+// ----------------- Edit Product (Merchant or Admin) -----------------
 app.patch("/api/v1/products/:id/edit", requireAuth, async (req, res) => {
   try {
-    const { title, images, category, retailPrice, merchantPrice, quantity } = req.body;
+    const { title, images, category, retailPrice, merchantPrice, quantity } =
+      req.body;
 
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
 
-    // Allow update if merchant owns it OR user is admin
-    if (product.merchantId.toString() !== req.user._id.toString() && req.user.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Not authorized" });
+    // Only allow merchant owner or admin
+    if (
+      product.merchantId.toString() !== req.user._id.toString() &&
+      req.user.role !== "admin"
+    ) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
     }
 
     if (title) product.title = title;
@@ -588,18 +616,26 @@ app.patch("/api/v1/products/:id/edit", requireAuth, async (req, res) => {
   }
 });
 
-// Delete Product (Merchant or Admin)
+// ----------------- Delete Product (Merchant or Admin) -----------------
 app.delete("/api/v1/products/:id", requireAuth, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
 
-    if (product.merchantId.toString() !== req.user._id.toString() && req.user.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Not authorized" });
+    // Only allow merchant owner or admin
+    if (
+      product.merchantId.toString() !== req.user._id.toString() &&
+      req.user.role !== "admin"
+    ) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
     }
 
     await product.deleteOne();
-
     res.json({ success: true, message: "Product deleted successfully" });
   } catch (err) {
     console.error(err);
@@ -607,14 +643,9 @@ app.delete("/api/v1/products/:id", requireAuth, async (req, res) => {
   }
 });
 
-
-
-
 // =============================== Blog ==================================
 
-// ----------------------
-// Blog Schema + Model
-// ----------------------
+// ----------------- Blog Schema + Model -----------------
 const blogSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
@@ -630,9 +661,7 @@ const blogSchema = new mongoose.Schema(
 
 const Blog = mongoose.model("Blog", blogSchema);
 
-// ----------------------
-// Blog Routes
-// ----------------------
+// ----------------- Blog Routes -----------------
 
 // Get all blogs
 app.get("/api/v1/blogs", async (req, res) => {
@@ -655,16 +684,16 @@ app.get("/api/v1/blogs/:id", async (req, res) => {
   }
 });
 
-
-
 // ----------------- Error Handler -----------------
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ error: "Server error" });
 });
 
-
 // ----------------- Start Server -----------------
 app.listen(PORT, () =>
   console.log(`🚀 VenTech server running at http://localhost:${PORT}`)
 );
+
+
+ 
