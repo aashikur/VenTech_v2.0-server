@@ -775,56 +775,6 @@ app.get("/api/v1/blogs/:id", async (req, res) => {
 
 
 
-
-// // Create blog
-// app.post("/api/v1/blogs", async (req, res) => {
-//   try {
-//     const blog = new Blog(req.body);
-//     await blog.save();
-//     res.status(201).json(blog);
-//   } catch (err) {
-//     res.status(400).json({ message: "Failed to create blog", error: err.message });
-//   }
-// });
-
-// // Update blog
-// app.put("/api/v1/blogs/:id", async (req, res) => {
-//   try {
-//     const blog = await Blog.findByIdAndUpdate(req.params.id, req.body, { new: true });
-//     if (!blog) return res.status(404).json({ message: "Blog not found" });
-//     res.json(blog);
-//   } catch (err) {
-//     res.status(400).json({ message: "Failed to update blog" });
-//   }
-// });
-
-// // Delete blog
-// app.delete("/api/v1/blogs/:id", async (req, res) => {
-//   try {
-//     const blog = await Blog.findByIdAndDelete(req.params.id);
-//     if (!blog) return res.status(404).json({ message: "Blog not found" });
-//     res.json({ message: "Blog deleted successfully" });
-//   } catch (err) {
-//     res.status(500).json({ message: "Failed to delete blog" });
-//   }
-// });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ----------------- Error Handler -----------------
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err);
