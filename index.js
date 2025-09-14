@@ -1,4 +1,8 @@
 // index.js - Firebase-auth-aware backend for VenTech
+
+// ---------------------------
+// ENV & Imports
+// ---------------------------
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -6,6 +10,7 @@ const mongoose = require("mongoose");
 const { z } = require("zod");
 const admin = require("firebase-admin");
 const path = require("path");
+
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI_PATH;
 
@@ -13,9 +18,11 @@ if (!MONGODB_URI) {
   throw new Error("Missing MONGODB_URI_PATH in .env");
 }
 
-// ----------------- Firebase Admin Init -----------------
+// ---------------------------
+// Firebase Admin Initialization
+// ---------------------------
 try {
-  const serviceAccount = require(path.join(__dirname, "admin-key.json")); // <-- load directly
+  const serviceAccount = require(path.join(__dirname, "admin-key.json"));
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
@@ -25,12 +32,16 @@ try {
   process.exit(1);
 }
 
-// ----------------- App + Middleware -----------------
+// ---------------------------
+// Express App & Middleware
+// ---------------------------
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ----------------- Mongoose Connect -----------------
+// ---------------------------
+// MongoDB Connection
+// ---------------------------
 mongoose.set("strictQuery", true);
 mongoose
   .connect(MONGODB_URI, { dbName: "ventech_db" })
@@ -40,7 +51,9 @@ mongoose
     process.exit(1);
   });
 
-// ----------------- Schemas & Models -----------------
+// ---------------------------
+// Schemas & Models
+// ---------------------------
 const { Schema, model } = mongoose;
 
 const ShopDetailsSchema = new Schema(
@@ -53,15 +66,13 @@ const ShopDetailsSchema = new Schema(
   { _id: false }
 );
 
-
 const UserSchema = new Schema(
   {
     name: { type: String, required: true, trim: true, minlength: 2 },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     phone: { type: String, default: null },
     photoURL: { type: String, default: null },
-    passwordHash: { type: String, default: null }, // optional (firebase handles login)
-    // roleRequest: { type: String, enum: ["merchant", "customer"], default: null }, // e.g., "merchant"
+    passwordHash: { type: String, default: null },
     roleRequest: {
       type: {
         type: String,
@@ -73,12 +84,8 @@ const UserSchema = new Schema(
         enum: ["pending", "approved", "rejected"],
         default: null
       },
-      requestedAt: {
-        type: Date,
-        default: Date.now
-      }
+      requestedAt: { type: Date, default: Date.now }
     },
-
     district: { type: String, default: null },
     role: { type: String, enum: ["admin", "merchant", "customer"], default: "customer" },
     status: { type: String, enum: ["active", "pending", "blocked"], default: "active" },
@@ -90,7 +97,9 @@ const UserSchema = new Schema(
 
 const User = model("User", UserSchema);
 
-// ----------------- Zod Validator -----------------
+// ---------------------------
+// Zod Validators
+// ---------------------------
 const shopRequestSchema = z.object({
   shopDetails: z
     .object({
@@ -118,7 +127,9 @@ function validate(schema) {
   };
 }
 
-// ----------------- Auth Middleware -----------------
+// ---------------------------
+// Auth Middlewares
+// ---------------------------
 const requireAuth = async (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ error: "No token provided" });
@@ -154,12 +165,8 @@ const requireAuth = async (req, res, next) => {
 
 const requireMerchant = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-  if (req.user.role !== "merchant") {
-    return res.status(403).json({ error: "Only merchants allowed" });
-  }
-  if (req.user.status !== "active") {
-    return res.status(403).json({ error: "Merchant account not approved yet" });
-  }
+  if (req.user.role !== "merchant") return res.status(403).json({ error: "Only merchants allowed" });
+  if (req.user.status !== "active") return res.status(403).json({ error: "Merchant account not approved yet" });
   next();
 };
 
@@ -169,42 +176,28 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// ----------------- Routes -----------------
-app.get("/api/v1/health", (_req, res) =>
-  res.json({ ok: true, db: mongoose.connection.name })
-);
+// ---------------------------
+// Health Check
+// ---------------------------
+app.get("/api/v1/health", (_req, res) => res.json({ ok: true, db: mongoose.connection.name }));
 
-
-
+// ---------------------------
+// Auth Routes
+// ---------------------------
 app.get("/api/v1/auth/me", requireAuth, async (req, res) => {
   res.json({ user: req.user });
 });
 
-
 app.post("/api/v1/auth/add-user", async (req, res) => {
   try {
-    const {
-      name,
-      email,
-      phone,
-      role,
-      status,
-      roleRequest,
-      loginCount,
-      ventech_user,
-      frontend_role,
-      shopDetails,
-    } = req.body;
+    const { name, email, phone, role, status, roleRequest, loginCount, ventech_user, frontend_role, shopDetails } = req.body;
 
-    console.log("Incoming user data:", req.body);
-
-    // Upsert: create new or update existing
     const updatedUser = await User.findOneAndUpdate(
-      { email }, // filter by email
+      { email },
       {
         $set: {
           name,
-        photoURL: "https://cdn-icons-png.flaticon.com/128/3135/3135715.png",
+          photoURL: "https://cdn-icons-png.flaticon.com/128/3135/3135715.png",
           phone: phone || null,
           role: role || "customer",
           status: status || "active",
@@ -215,7 +208,7 @@ app.post("/api/v1/auth/add-user", async (req, res) => {
           shopDetails: shopDetails || null,
         },
       },
-      { new: true, upsert: true } // new: return updated doc, upsert: create if not exists
+      { new: true, upsert: true }
     );
 
     res.status(201).json({ user: updatedUser, message: "User created or updated successfully" });
@@ -225,29 +218,19 @@ app.post("/api/v1/auth/add-user", async (req, res) => {
   }
 });
 
-
-
- // ------------------- Request Merchant Role (customar) -------------------
+// ---------------------------
+// Merchant Request Routes
+// ---------------------------
 app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-
     if (!user) return res.status(404).json({ message: "User not found" });
 
     if (user.roleRequest?.type === "merchant" && user.roleRequest?.status === "pending") {
       return res.status(400).json({ message: "Merchant request already pending" });
     }
 
-
-    // Only update roleRequest and status
-    // Update roleRequest as an object
-    user.roleRequest = {
-      type: "merchant",
-      status: "pending",
-      requestedAt: new Date(),
-    };
-
-    // Keep main account active while waiting
+    user.roleRequest = { type: "merchant", status: "pending", requestedAt: new Date() };
     user.status = "active";
     await user.save();
 
@@ -258,21 +241,15 @@ app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
   }
 });
 
-// Request Merchant Rejected (customar) ------------------
-// PATCH /api/v1/admin/reject-merchant/:id
 app.patch("/api/v1/admin/reject-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-
     const user = await User.findById(id);
     if (!user) return res.status(404).json({ message: "User not found" });
-
-    if (!user.roleRequest || user.roleRequest.type !== "merchant") {
-      return res.status(400).json({ message: "No merchant request found" });
-    }
+    if (!user.roleRequest || user.roleRequest.type !== "merchant") return res.status(400).json({ message: "No merchant request found" });
 
     user.roleRequest.status = "rejected";
-    user.role = "customer"; // revert role to customer
+    user.role = "customer";
     await user.save();
 
     res.json({ message: "Merchant request rejected", user });
@@ -282,15 +259,31 @@ app.patch("/api/v1/admin/reject-merchant/:id", requireAuth, requireAdmin, async 
   }
 });
 
+app.patch("/api/v1/admin/approve-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.roleRequest || user.roleRequest.type !== "merchant") return res.status(400).json({ message: "No merchant request found" });
 
+    user.roleRequest.status = "approved";
+    user.role = "merchant";
+    user.status = user.status === "pending" ? "active" : user.status;
+    await user.save();
 
+    res.json({ message: "Merchant approved", user });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-
-// Update User Profile (Auth)
+// ---------------------------
+// Profile Update Route
+// ---------------------------
 app.patch("/api/v1/auth/update-profile", requireAuth , async (req, res) => {
   try {
     const { name, phone, district, shopDetails } = req.body;
-
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -307,48 +300,23 @@ app.patch("/api/v1/auth/update-profile", requireAuth , async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//  -------------------  Get All Users (Admin) -------------------
-
-
+// ---------------------------
+// Admin User Management Routes
+// ---------------------------
 app.get("/api/v1/admin/users", requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const users = await User.find({ role: { $ne: "admin" } }).sort({ createdAt: -1 });
     res.status(200).json(users);
   } catch (err) {
-    next(err); // handled by global error handler
+    next(err);
   }
 });
 
-// delete user (admin)
-// DELETE a user by ID (Admin only)
 app.delete("/api/v1/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const user = await User.findByIdAndDelete(id);
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
+    if (!user) return res.status(404).json({ message: "User not found" });
     res.json({ message: "User deleted successfully" });
   } catch (err) {
     console.error("Delete user error:", err);
@@ -356,16 +324,12 @@ app.delete("/api/v1/admin/users/:id", requireAuth, requireAdmin, async (req, res
   }
 });
 
-
-// ------------------- Pending Merchant (Admin) -------------------
-// GET /api/v1/admin/pending-merchants
 app.get("/api/v1/admin/pending-merchants", requireAuth,  async (req, res) => {
   try {
     const pendingMerchants = await User.find({
       "roleRequest.type": "merchant",
       "roleRequest.status": "pending"
     }).sort({ "roleRequest.requestedAt": -1 });
-    
     res.status(200).json(pendingMerchants);
   } catch (err) {
     console.error(err);
@@ -373,52 +337,16 @@ app.get("/api/v1/admin/pending-merchants", requireAuth,  async (req, res) => {
   }
 });
 
-// ------------------- Approve Merchant (Admin) -------------------
-
-// PATCH /api/v1/admin/approve-merchant/:id
-app.patch("/api/v1/admin/approve-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const user = await User.findById(id);
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    if (!user.roleRequest || user.roleRequest.type !== "merchant") {
-      return res.status(400).json({ message: "No merchant request found" });
-    }
-
-    user.roleRequest.status = "approved";
-    user.role = "merchant"; // Convert user role
-    user.status = user.status === "pending" ? "active" : user.status; // activate if pending
-    await user.save();
-
-    res.json({ message: "Merchant approved", user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-
-//  ------------------- Mailbox Routes -------------------
-// ------------------- POST Mailbox -------------------
+// ---------------------------
+// Mailbox Routes
+// ---------------------------
 app.post("/api/public/mailbox", async (req, res) => {
   try {
     const { name, email, subject, message } = req.body;
-
-    if (!name || !email || !subject || !message) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
+    if (!name || !email || !subject || !message) return res.status(400).json({ message: "All fields are required" });
 
     const mailboxCollection = mongoose.connection.collection("mailbox");
-
-    const result = await mailboxCollection.insertOne({
-      name,
-      email,
-      subject,
-      message,
-      createdAt: new Date(),
-    });
+    const result = await mailboxCollection.insertOne({ name, email, subject, message, createdAt: new Date() });
 
     res.status(201).json({ message: "Message saved successfully", id: result.insertedId });
   } catch (err) {
@@ -426,13 +354,11 @@ app.post("/api/public/mailbox", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-// ------------------- GET Mailbox -------------------
+
 app.get("/api/public/mailbox", async (req, res) => {
   try {
     const mailboxCollection = mongoose.connection.collection("mailbox");
-
     const messages = await mailboxCollection.find({}).sort({ createdAt: -1 }).toArray();
-
     res.status(200).json(messages);
   } catch (err) {
     console.error("Mailbox GET error:", err);
@@ -440,20 +366,15 @@ app.get("/api/public/mailbox", async (req, res) => {
   }
 });
 
-
-
-
-// Category model ============================================
+// ---------------------------
+// Category Routes
+// ---------------------------
 const Category = mongoose.model(
   "Category",
-  new mongoose.Schema({
-    name: { type: String, required: true },
-    image: { type: String },
-  }),
-  "categories" // this ensures it uses the 'categories' collection
+  new mongoose.Schema({ name: { type: String, required: true }, image: { type: String } }),
+  "categories"
 );
 
-// GET all categories
 app.get("/api/v1/categories", async (req, res) => {
   try {
     const categories = await Category.find({});
@@ -464,7 +385,6 @@ app.get("/api/v1/categories", async (req, res) => {
   }
 });
 
-// ----------------- Add New Category -----------------
 app.post("/api/v1/categories", async (req, res) => {
   try {
     const { name, image } = req.body;
@@ -480,7 +400,6 @@ app.post("/api/v1/categories", async (req, res) => {
   }
 });
 
-// ----------------- Update Category (name or image) -----------------
 app.patch("/api/v1/categories/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -493,7 +412,6 @@ app.patch("/api/v1/categories/:id", async (req, res) => {
     if (image) category.image = image;
 
     await category.save();
-
     res.json({ success: true, message: "Category updated", category });
   } catch (err) {
     console.error("Failed to update category:", err);
@@ -501,26 +419,20 @@ app.patch("/api/v1/categories/:id", async (req, res) => {
   }
 });
 
-
-// ====================== Products =========================================
-
-// ----------------- Product Schema -----------------
+// ---------------------------
+// Product Routes
+// ---------------------------
 const ProductSchema = new Schema(
   {
     title: { type: String, required: true, trim: true },
     description: { type: String, required: true },
     category: { type: String, required: true },
-        categoryImage: { type: String, default: null }, // <-- NEW FIELD
-
+    categoryImage: { type: String, default: null },
     images: [{ type: String, required: true }],
     retailPrice: { type: Number, required: true },
     merchantPrice: { type: Number, required: true },
     quantity: { type: Number, required: true, min: 0 },
-    stockStatus: {
-      type: String,
-      enum: ["in-stock", "out-of-stock"],
-      default: "in-stock",
-    },
+    stockStatus: { type: String, enum: ["in-stock", "out-of-stock"], default: "in-stock" },
     merchantId: { type: Schema.Types.ObjectId, ref: "User", required: true },
   },
   { timestamps: true }
@@ -528,63 +440,26 @@ const ProductSchema = new Schema(
 
 const Product = model("Product", ProductSchema);
 
-
-
-// ------------------- Create Product (Merchant) -----------------
-// ----------------- Product Routes -----------------
+// Create Product
 app.post("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      category,
-      categoryImage,
-      images,
-      retailPrice,
-      merchantPrice,
-      quantity,
-    } = req.body;
-
-    // console.log("Add Product Payload:", req.body);
-
+    const { title, description, category, categoryImage, images, retailPrice, merchantPrice, quantity } = req.body;
     const stockStatus = quantity > 0 ? "in-stock" : "out-of-stock";
 
-    const newProduct = new Product({
-      title,
-      description,
-      category,
-      categoryImage: categoryImage || null,
-      images,
-      retailPrice,
-      merchantPrice,
-      quantity,
-      stockStatus,
-      merchantId: req.user._id, // from requireAuth
-    });
-
+    const newProduct = new Product({ title, description, category, categoryImage: categoryImage || null, images, retailPrice, merchantPrice, quantity, stockStatus, merchantId: req.user._id });
     await newProduct.save();
 
-    res.status(201).json({
-      success: true,
-      message: "Product added successfully",
-      product: newProduct,
-    });
+    res.status(201).json({ success: true, message: "Product added successfully", product: newProduct });
   } catch (err) {
     console.error("❌ Add Product Error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to add product",
-      error: err.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to add product", error: err.message });
   }
 });
 
-
-// ------------ Get all product Marchent ---------------------------
-// GET all products (for merchant view)
+// Get Products (All)
 app.get("/api/v1/products", requireAuth, async (req, res) => {
   try {
-    const products = await Product.find(); // only own products
+    const products = await Product.find();
     res.json(products);
   } catch (err) {
     console.error("Error fetching products:", err);
@@ -592,51 +467,58 @@ app.get("/api/v1/products", requireAuth, async (req, res) => {
   }
 });
 
-
-// GET all products (public view)
+// Public Products
 app.get("/api/v1/products/public", async (req, res) => {
   try {
-    const products = await Product.find(); // get all products, no auth required
-    res.json(products); // return as array directly
+    const products = await Product.find();
+    res.json(products);
   } catch (err) {
     console.error("Error fetching public products:", err);
     res.status(500).json({ message: "Failed to fetch products" });
   }
 });
-// GET all products (public view)
+
 app.get("/api/v1/products/:id", async (req, res) => {
   try { 
-    const params = req.params.id;
-    console.log("Product ID:", params);
-    const product = await Product.findById(params);
-    // const products = await Product.find(); // get all products, no auth required
-    res.json(product); // return as array directly
+    const product = await Product.findById(req.params.id);
+    res.json(product);
   } catch (err) {
     console.error("Error fetching public products:", err);
     res.status(500).json({ message: "Failed to fetch products" });
   }
 });
 
-
-// ----------------- Update Stock (Increment / Decrement) -----------------
+// Update Stock
 app.patch("/api/v1/products/:id/update-stock", requireAuth, requireMerchant, async (req, res) => {
   try {
-    const { quantity } = req.body; // new quantity
+    const { quantity } = req.body;
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product) 
+      return res.status(404).json({ success: false, message: "Product not found" });
+
     if (product.merchantId.toString() !== req.user._id.toString())
       return res.status(403).json({ success: false, message: "Not authorized" });
 
+    // Update quantity and stockStatus
     product.quantity = quantity;
     product.stockStatus = quantity > 0 ? "in-stock" : "out-of-stock";
+
     await product.save();
 
     res.json({ success: true, message: "Stock updated", product });
   } catch (err) {
-    console.error(err);
+    console.error("Update stock error:", err);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 });
+
+
+
+
+
+
+
+
 
 // ----------------- Stock Out -----------------
 app.patch("/api/v1/products/:id/stock-out", requireAuth, requireMerchant, async (req, res) => {
