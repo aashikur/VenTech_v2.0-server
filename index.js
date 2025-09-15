@@ -690,10 +690,13 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: "Server error" });
 });
 
+
+app.get("/", (req, res) => {
+  res.send("Hello from VenTech!");
+});
+
 // ----------------- Start Server -----------------
-// app.listen(PORT, () =>
-//   console.log(`🚀 VenTech server running at http://localhost:${PORT}`)
-// );
+app.listen(PORT, () =>
+  console.log(`🚀 VenTech server running at http://localhost:${PORT}`)
+);
 
-
- 
