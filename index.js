@@ -692,7 +692,7 @@ app.use((err, _req, res, _next) => {
 
 
 app.get("/", (req, res) => {
-  res.send("Hello from VenTech!");
+  res.send("Hello from VenTech V3!");
 });
 
 // ----------------- Start Server -----------------
