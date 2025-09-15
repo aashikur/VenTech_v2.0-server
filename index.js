@@ -479,14 +479,30 @@ app.get("/api/v1/products/public", async (req, res) => {
 });
 
 app.get("/api/v1/products/:id", async (req, res) => {
-  try { 
+  try {
     const product = await Product.findById(req.params.id);
-    res.json(product);
+
+    if (!product) return res.status(404).json({ message: "Product not found" });
+
+    // Fetch merchant manually
+    const merchant = await User.findById(product.merchantId).select(
+      "name email phone photoURL shopDetails role status"
+    );
+
+    // Create new object with addedByMerchant
+    const productWithMerchant = {
+      ...product.toObject(),
+      addedByMerchant: merchant || null, // null if not found
+    };
+
+    res.json(productWithMerchant);
   } catch (err) {
-    console.error("Error fetching public products:", err);
-    res.status(500).json({ message: "Failed to fetch products" });
+    console.error("Error fetching product:", err);
+    res.status(500).json({ message: "Failed to fetch product" });
   }
 });
+
+
 
 // Update Stock
 app.patch("/api/v1/products/:id/update-stock", requireAuth, requireMerchant, async (req, res) => {
