@@ -226,20 +226,28 @@ app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    // Prevent duplicate pending request
     if (user.roleRequest?.type === "merchant" && user.roleRequest?.status === "pending") {
       return res.status(400).json({ message: "Merchant request already pending" });
     }
 
+    // Only set roleRequest for merchant
     user.roleRequest = { type: "merchant", status: "pending", requestedAt: new Date() };
+    
+    // Optionally keep account active while waiting
     user.status = "active";
+
     await user.save();
 
-    res.json({ message: "Request sent successfully", user });
+    res.json({ message: "Merchant request sent successfully", user });
   } catch (err) {
     console.error("Merchant request error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+
 
 app.patch("/api/v1/admin/reject-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -281,16 +289,29 @@ app.patch("/api/v1/admin/approve-merchant/:id", requireAuth, requireAdmin, async
 // ---------------------------
 // Profile Update Route
 // ---------------------------
-app.patch("/api/v1/auth/update-profile", requireAuth , async (req, res) => {
+app.patch("/api/v1/auth/update-profile", requireAuth, async (req, res) => {
   try {
-    const { name, phone, district, shopDetails } = req.body;
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    const { name, phone, avatar, district, upazila, shopDetails } = req.body;
+
+    // General user fields
     user.name = name || user.name;
     user.phone = phone || user.phone;
     user.district = district || user.district;
-    user.shopDetails = shopDetails || user.shopDetails;
+    user.upazila = upazila || user.upazila;
+    user.photoURL = avatar || user.photoURL;
+
+    // Merchant/shop info
+    if (shopDetails) {
+      user.shopDetails = {
+        shopName: shopDetails.shopName || user.shopDetails?.shopName || "",
+        shopNumber: shopDetails.shopNumber || user.shopDetails?.shopNumber || "",
+        shopAddress: shopDetails.shopAddress || user.shopDetails?.shopAddress || "",
+        tradeLicense: shopDetails.tradeLicense || user.shopDetails?.tradeLicense || "",
+      };
+    }
 
     await user.save();
     res.json({ message: "Profile updated successfully", user });
@@ -300,10 +321,12 @@ app.patch("/api/v1/auth/update-profile", requireAuth , async (req, res) => {
   }
 });
 
+
+
 // ---------------------------
 // Admin User Management Routes
 // ---------------------------
-app.get("/api/v1/admin/users", requireAuth, requireAdmin, async (req, res, next) => {
+app.get("/api/v1/admin/users", requireAuth, async (req, res, next) => {
   try {
     const users = await User.find({ role: { $ne: "admin" } }).sort({ createdAt: -1 });
     res.status(200).json(users);
@@ -466,6 +489,19 @@ app.get("/api/v1/products", requireAuth, async (req, res) => {
     res.status(500).json({ message: "Server Error" });
   }
 });
+
+// Get Merchant by ID
+app.get('/api/v1/getUser/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const merchant = await User.findById(id).select('name email phone photoURL shopDetails role status');
+    if (!merchant) return res.status(404).json({ message: 'Merchant not found' });
+    res.json(merchant);
+  } catch (err) {
+    console.error('Error fetching merchant:', err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+})
 
 // Public Products
 app.get("/api/v1/products/public", async (req, res) => {
@@ -700,6 +736,12 @@ app.get("/api/v1/blogs/:id", async (req, res) => {
   }
 });
 
+
+
+
+
+
+
 // ----------------- Error Handler -----------------
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err);
@@ -710,6 +752,60 @@ app.use((err, _req, res, _next) => {
 app.get("/", (req, res) => {
   res.send("Hello from VenTech V3!");
 });
+
+
+// ------------- OrderSchema----------------
+const OrderSchema = new mongoose.Schema(
+  {
+    product: { type: Object, required: true }, // save full product object (not ideal for production, but fine for now)
+    quantity: { type: Number, default: 1 },
+    status: { type: String, enum: ["pending", "confirmed", "shipped", "delivered", "cancelled"], default: "pending" },
+    orderedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, // user ID
+    addedByMerchant: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // merchant ID
+  },
+  { timestamps: true }
+);
+
+const Order = mongoose.model("Order", OrderSchema);
+
+
+// Create a new order
+app.post("/api/v1/orders", async (req, res) => {
+  try {
+    const { product, quantity, status, orderedBy, addedByMerchant } = req.body;
+
+    if (!orderedBy) {
+      return res.status(400).json({ error: "orderedBy is required" });
+    }
+
+    const newOrder = new Order({
+      product,
+      quantity,
+      status,
+      orderedBy,
+      addedByMerchant,
+    });
+
+    await newOrder.save();
+
+    res.status(201).json({ message: "Order created successfully", order: newOrder });
+  } catch (err) {
+    console.error("Order creation error:", err.message);
+    res.status(500).json({ error: "Failed to create order" });
+  }
+});
+
+// ✅ Get All Orders (GET)
+app.get("/api/v1/orders", async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 });
+    res.json({ success: true, count: orders.length, data: orders });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 
 // ----------------- Start Server -----------------
 app.listen(PORT, () =>
