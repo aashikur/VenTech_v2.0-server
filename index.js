@@ -805,6 +805,64 @@ app.get("/api/v1/orders", async (req, res) => {
   }
 });
 
+// --- Fixed RequestList Schema --------------------------------------
+const requestListSchema = new mongoose.Schema({
+  requestedByMerchant: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  requestedToMerchant: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  productTitle: { type: String, required: true },
+  productCategory: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+});
+
+const RequestList = mongoose.model("RequestList", requestListSchema);
+
+// --- Route to POST request ---
+app.post("/api/v1/request-list", async (req, res) => {
+  try {
+    const { requestedByMerchant, requestedToMerchant, productTitle, productCategory } = req.body;
+
+    // Validate all required fields
+    if (!requestedByMerchant || !requestedToMerchant || !productTitle || !productCategory) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // Create request
+    const request = await RequestList.create({
+      requestedByMerchant,
+      requestedToMerchant,
+      productTitle,
+      productCategory,
+    });
+    console.log("RequestList created:", request); // ✅ log to confirm
+
+    res.status(201).json({ message: "Request saved successfully", request });
+  } catch (err) {
+    console.error("RequestList POST error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+// ----------------- Get all RequestList (Public) -----------------
+app.get("/api/v1/request-list", async (req, res) => {
+  try {
+    // Fetch all requests, latest first
+    const requests = await RequestList.find().sort({ createdAt: -1 })
+      .populate("requestedByMerchant", "name email")   // optional, if you want merchant details
+      .populate("requestedToMerchant", "name email");  // optional
+
+    res.status(200).json({ success: true, count: requests.length, data: requests });
+  } catch (err) {
+    console.error("Failed to fetch RequestList:", err.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+
+
+
+
+
 
 
 // ----------------- Start Server -----------------
