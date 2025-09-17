@@ -483,6 +483,7 @@ app.post("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
 app.get("/api/v1/products", requireAuth, async (req, res) => {
   try {
     const products = await Product.find();
+    console.log(products)
     res.json(products);
   } catch (err) {
     console.error("Error fetching products:", err);
@@ -742,17 +743,6 @@ app.get("/api/v1/blogs/:id", async (req, res) => {
 
 
 
-// ----------------- Error Handler -----------------
-app.use((err, _req, res, _next) => {
-  console.error("Unhandled error:", err);
-  res.status(500).json({ error: "Server error" });
-});
-
-
-app.get("/", (req, res) => {
-  res.send("Hello from VenTech V3!");
-});
-
 
 // ------------- OrderSchema----------------
 const OrderSchema = new mongoose.Schema(
@@ -820,6 +810,7 @@ const RequestList = mongoose.model("RequestList", requestListSchema);
 app.post("/api/v1/request-list", async (req, res) => {
   try {
     const { requestedByMerchant, requestedToMerchant, productTitle, productCategory } = req.body;
+    console.log("RequestList POST body:", req.body); // ✅ log incoming data
 
     // Validate all required fields
     if (!requestedByMerchant || !requestedToMerchant || !productTitle || !productCategory) {
@@ -858,6 +849,27 @@ app.get("/api/v1/request-list", async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+
+
+
+
+
+// ----------------- Error Handler -----------------
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Server error" });
+});
+
+
+app.get("/", (req, res) => {
+  res.send("Hello from VenTech V4!");
+});
 
 // ----------------- Start Server -----------------
 app.listen(PORT, () =>
