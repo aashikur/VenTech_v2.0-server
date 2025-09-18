@@ -859,6 +859,22 @@ app.get("/api/v1/request-list", async (req, res) => {
 
 
 // =================================================================
+// Hello message from the server
+// =================================================================
+
+app.get("/", (req, res) => {
+  res.send({
+  "message": "Welcome to VenTech V4 Multivendor E-Commerce Marketplace Backend API",
+  "version": "4.0.0",
+  "status": "running",
+  "author": "Ashikur Rahaman",
+  "contact": "mdaashikur@gmail.com",
+  "documentation": "https://github.com/aashikur/VenTech_v2.0-server",
+  "timestamp": "2025-09-18T13:45:00Z"
+});
+});
+
+// =================================================================
 // 8. ERROR HANDLING
 // =================================================================
 app.use((err, _req, res, _next) => {

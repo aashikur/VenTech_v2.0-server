@@ -41,6 +41,12 @@ A **Node.js + Express backend** for the **VenTech Multi-Vendor Marketplace**, ha
 ### 🩺 Healthcheck
 - `/api/v1/health` → server + DB status
 
+
+
+## 🌐 Live API Link
+Check out the live backend: [https://ven-tech-v2-0-server.vercel.app/](https://ven-tech-v2-0-server.vercel.app/)
+
+
 ---
 
 ## 📂 Project Structure
