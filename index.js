@@ -1,25 +1,89 @@
-/**
- * VenTech E-commerce Platform Backend API
- * ======================================
- * A comprehensive backend system for the VenTech e-commerce platform
- * featuring user authentication, product management, and order processing.
- * 
- * Key Features:
- * - Firebase Authentication Integration
- * - MongoDB Database Connection
- * - User Role Management (Admin/Merchant/Customer)
- * - Product CRUD Operations
- * - Order Processing System
- * - Blog Management
- * - Request List System
- * 
- * @version 2.0.0
- * @author VenTech Team
- */
+/*
+===============================================================================
+VenTech E-commerce Platform Backend API (index.js)
+===============================================================================
 
-// =================================================================
-// 1. DEPENDENCIES & ENVIRONMENT SETUP
-// =================================================================
+Overview:
+---------
+This file implements the backend API for the VenTech multi-vendor e-commerce 
+platform. It is designed to provide robust, scalable, and secure services 
+for user authentication, product management, order processing, blog management, 
+and inter-merchant product requests. The backend leverages Node.js, Express, 
+MongoDB (via Mongoose), and Firebase Admin SDK for authentication.
+
+Key Components:
+---------------
+1. Environment & Dependencies:
+   - Loads environment variables and imports all required modules, including 
+     Express for HTTP server, Mongoose for MongoDB interaction, Firebase Admin 
+     for authentication, and Zod for request validation.
+
+2. Firebase Admin Initialization:
+   - Initializes the Firebase Admin SDK using a service account key for 
+     verifying user tokens and managing authentication.
+
+3. Express App & Middleware:
+   - Sets up the Express application, enables CORS, and configures JSON parsing 
+     for incoming requests.
+
+4. MongoDB Connection:
+   - Establishes a connection to the MongoDB database, ensuring the backend 
+     can persist and retrieve data.
+
+5. Schemas & Models:
+   - Defines Mongoose schemas and models for Users, Products, Categories, 
+     Blogs, Orders, and Request Lists. These schemas enforce data structure 
+     and validation at the database level.
+
+6. Zod Validators:
+   - Provides request validation using Zod to ensure incoming data meets 
+     expected formats before processing.
+
+7. Authentication & Authorization Middleware:
+   - Implements middleware to verify Firebase tokens, enforce user roles 
+     (admin, merchant, customer), and protect sensitive routes.
+
+8. API Routes:
+   - Health Check: Simple endpoint to verify API status.
+   - Authentication: Endpoints for user profile retrieval and creation.
+   - Merchant Requests: Allows users to request merchant status and for 
+     admins to approve/reject such requests.
+   - Profile Management: Enables users to update their profile information.
+   - Admin User Management: Admin-only endpoints for managing users.
+   - Mailbox: Public endpoints for submitting and retrieving support messages.
+   - Categories: CRUD operations for product categories.
+   - Products: CRUD operations for products, including stock management and 
+     merchant-specific actions.
+   - Blogs: CRUD operations for blog posts.
+   - Orders: Endpoints for creating and retrieving orders.
+   - Request List: Allows merchants to request products from other merchants.
+
+9. Error Handling:
+   - Centralized error handler to catch and respond to unexpected errors 
+     gracefully.
+
+10. Server Initialization:
+    - Starts the Express server on the configured port and provides a root 
+      endpoint with a welcome message.
+
+Design Philosophy:
+------------------
+- Security: Uses Firebase Admin for secure authentication and role-based 
+  access control.
+- Scalability: Modular schema definitions and middleware for easy extension.
+- Maintainability: Clear separation of concerns and comprehensive error 
+  handling.
+- Usability: Provides RESTful endpoints for all major resources, with 
+  validation and meaningful error messages.
+
+===============================================================================
+*/
+
+// index.js - Firebase-auth-aware backend for VenTech
+
+// ---------------------------
+// ENV & Imports
+// ---------------------------
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -28,60 +92,52 @@ const { z } = require("zod");
 const admin = require("firebase-admin");
 const path = require("path");
 
-// Environment Variables Configuration
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI_PATH;
 
-// Validate Required Environment Variables
 if (!MONGODB_URI) {
-  throw new Error("❌ Missing MONGODB_URI_PATH in environment variables");
+  throw new Error("Missing MONGODB_URI_PATH in .env");
 }
 
-// =================================================================
-// 2. FIREBASE ADMIN INITIALIZATION
-// =================================================================
+// ---------------------------
+// Firebase Admin Initialization
+// ---------------------------
 try {
   const serviceAccount = require(path.join(__dirname, "admin-key.json"));
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
-  console.log("✅ Firebase Admin SDK initialized successfully");
+  console.log("✅ Firebase Admin initialized with admin-key.json");
 } catch (err) {
-  console.error("❌ Firebase Admin initialization failed:", err);
+  console.error("❌ Failed to load admin-key.json:", err);
   process.exit(1);
 }
 
-// =================================================================
-// 3. EXPRESS APP & MIDDLEWARE SETUP
-// =================================================================
+// ---------------------------
+// Express App & Middleware
+// ---------------------------
 const app = express();
-
-// Basic Middleware
 app.use(cors());
 app.use(express.json());
 
-// =================================================================
-// 4. DATABASE CONNECTION
-// =================================================================
+// ---------------------------
+// MongoDB Connection
+// ---------------------------
 mongoose.set("strictQuery", true);
-
 mongoose
   .connect(MONGODB_URI, { dbName: "ventech_db" })
-  .then(() => console.log("✅ MongoDB Connected Successfully"))
+  .then(() => console.log("✅ Connected to MongoDB"))
   .catch((err) => {
-    console.error("❌ MongoDB Connection Error:", err);
+    console.error("❌ MongoDB connect error:", err);
     process.exit(1);
   });
 
-// =================================================================
-// 5. SCHEMA DEFINITIONS
-// =================================================================
+// ---------------------------
+// Schemas & Models
+// ---------------------------
+const { Schema, model } = mongoose;
 
-/**
- * Shop Details Schema
- * Stores merchant shop information
- */
-const ShopDetailsSchema = new mongoose.Schema(
+const ShopDetailsSchema = new Schema(
   {
     shopName: { type: String, trim: true },
     shopNumber: { type: String, trim: true },
@@ -91,7 +147,7 @@ const ShopDetailsSchema = new mongoose.Schema(
   { _id: false }
 );
 
-const UserSchema = new mongoose.Schema(
+const UserSchema = new Schema(
   {
     name: { type: String, required: true, trim: true, minlength: 2 },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
@@ -120,14 +176,41 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// =================================================================
-// 6. MIDDLEWARE FUNCTIONS
-// =================================================================
+const User = model("User", UserSchema);
 
-/**
- * Authentication Middleware
- * Verifies Firebase token and attaches user to request
- */
+// ---------------------------
+// Zod Validators
+// ---------------------------
+const shopRequestSchema = z.object({
+  shopDetails: z
+    .object({
+      shopName: z.string().min(2),
+      shopNumber: z.string().min(1),
+      shopAddress: z.string().min(3),
+      tradeLicense: z.string().optional().nullable(),
+    })
+    .optional()
+    .nullable(),
+});
+
+function validate(schema) {
+  return (req, res, next) => {
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      const details = parsed.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      return res.status(400).json({ error: "Validation failed", details });
+    }
+    req.body = parsed.data;
+    next();
+  };
+}
+
+// ---------------------------
+// Auth Middlewares
+// ---------------------------
 const requireAuth = async (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ error: "No token provided" });
@@ -161,10 +244,6 @@ const requireAuth = async (req, res, next) => {
   }
 };
 
-/**
- * Merchant Authorization Middleware
- * Ensures user has merchant role and active status
- */
 const requireMerchant = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: "Unauthorized" });
   if (req.user.role !== "merchant") return res.status(403).json({ error: "Only merchants allowed" });
@@ -178,22 +257,14 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// =================================================================
-// 7. API ROUTES
-// =================================================================
+// ---------------------------
+// Health Check
+// ---------------------------
+app.get("/api/v1/health", (_req, res) => res.json({ ok: true, db: mongoose.connection.name }));
 
-/**
- * Health Check Route
- * Simple endpoint to verify API status
- */
-app.get("/api/v1/health", (_req, res) => {
-  res.json({ status: "healthy", timestamp: new Date() });
-});
-
-/**
- * Authentication Routes
- * Handles user authentication and profile management
- */
+// ---------------------------
+// Auth Routes
+// ---------------------------
 app.get("/api/v1/auth/me", requireAuth, async (req, res) => {
   res.json({ user: req.user });
 });
@@ -228,10 +299,9 @@ app.post("/api/v1/auth/add-user", async (req, res) => {
   }
 });
 
-/**
- * Merchant Request Routes
- * Handles merchant registration requests
- */
+// ---------------------------
+// Merchant Request Routes
+// ---------------------------
 app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -256,6 +326,9 @@ app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+
 
 app.patch("/api/v1/admin/reject-merchant/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -294,10 +367,9 @@ app.patch("/api/v1/admin/approve-merchant/:id", requireAuth, requireAdmin, async
   }
 });
 
-/**
- * Profile Update Route
- * Allows users to update their profile information
- */
+// ---------------------------
+// Profile Update Route
+// ---------------------------
 app.patch("/api/v1/auth/update-profile", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -330,10 +402,11 @@ app.patch("/api/v1/auth/update-profile", requireAuth, async (req, res) => {
   }
 });
 
-/**
- * Admin User Management Routes
- * For admin to manage users and their roles
- */
+
+
+// ---------------------------
+// Admin User Management Routes
+// ---------------------------
 app.get("/api/v1/admin/users", requireAuth, async (req, res, next) => {
   try {
     const users = await User.find({ role: { $ne: "admin" } }).sort({ createdAt: -1 });
@@ -368,10 +441,9 @@ app.get("/api/v1/admin/pending-merchants", requireAuth,  async (req, res) => {
   }
 });
 
-/**
- * Mailbox Routes
- * For user inquiries and support messages
- */
+// ---------------------------
+// Mailbox Routes
+// ---------------------------
 app.post("/api/public/mailbox", async (req, res) => {
   try {
     const { name, email, subject, message } = req.body;
@@ -398,10 +470,9 @@ app.get("/api/public/mailbox", async (req, res) => {
   }
 });
 
-/**
- * Category Routes
- * Manage product categories
- */
+// ---------------------------
+// Category Routes
+// ---------------------------
 const Category = mongoose.model(
   "Category",
   new mongoose.Schema({ name: { type: String, required: true }, image: { type: String } }),
@@ -452,11 +523,10 @@ app.patch("/api/v1/categories/:id", async (req, res) => {
   }
 });
 
-/**
- * Product Routes
- * Manage products in the marketplace
- */
-const ProductSchema = new mongoose.Schema(
+// ---------------------------
+// Product Routes
+// ---------------------------
+const ProductSchema = new Schema(
   {
     title: { type: String, required: true, trim: true },
     description: { type: String, required: true },
@@ -467,12 +537,12 @@ const ProductSchema = new mongoose.Schema(
     merchantPrice: { type: Number, required: true },
     quantity: { type: Number, required: true, min: 0 },
     stockStatus: { type: String, enum: ["in-stock", "out-of-stock"], default: "in-stock" },
-    merchantId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    merchantId: { type: Schema.Types.ObjectId, ref: "User", required: true },
   },
   { timestamps: true }
 );
 
-const Product = mongoose.model("Product", ProductSchema);
+const Product = model("Product", ProductSchema);
 
 // Create Product
 app.post("/api/v1/products", requireAuth, requireMerchant, async (req, res) => {
@@ -551,6 +621,7 @@ app.get("/api/v1/products/:id", async (req, res) => {
 });
 
 
+
 // Update Stock
 app.patch("/api/v1/products/:id/update-stock", requireAuth, requireMerchant, async (req, res) => {
   try {
@@ -574,6 +645,7 @@ app.patch("/api/v1/products/:id/update-stock", requireAuth, requireMerchant, asy
     res.status(500).json({ success: false, message: "Server Error" });
   }
 });
+
 
 
 // ----------------- Stock Out -----------------
@@ -750,6 +822,9 @@ app.get("/api/v1/blogs/:id", async (req, res) => {
 
 
 
+
+
+
 // ------------- OrderSchema----------------
 const OrderSchema = new mongoose.Schema(
   {
@@ -858,46 +933,27 @@ app.get("/api/v1/request-list", async (req, res) => {
 
 
 
-// =================================================================
-// Hello message from the server
-// =================================================================
+
+
+
+
+
+
+
+
+// ----------------- Error Handler -----------------
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Server error" });
+});
+
 
 app.get("/", (req, res) => {
-  res.send({
-  "message": "Welcome to VenTech V4 Multivendor E-Commerce Marketplace Backend API",
-  "version": "4.0.0",
-  "status": "running",
-  "author": "Ashikur Rahaman",
-  "contact": "mdaashikur@gmail.com",
-  "documentation": "https://github.com/aashikur/VenTech_v2.0-server",
-  "timestamp": "2025-09-18T13:45:00Z"
-});
+  res.send("Hello from VenTech V4!");
 });
 
-// =================================================================
-// 8. ERROR HANDLING
-// =================================================================
-app.use((err, _req, res, _next) => {
-  console.error("❌ Unhandled Error:", err);
-  res.status(500).json({ 
-    error: "Internal Server Error",
-    message: process.env.NODE_ENV === "development" ? err.message : undefined
-  });
-});
-
-// =================================================================
-// 9. SERVER INITIALIZATION
-// =================================================================
-// Comment out for Vercel deployment
-app.listen(PORT, () => {
-  console.log(`
-🚀 VenTech Server Started
-📍 PORT: ${PORT}
-🌐 URL: http://localhost:${PORT}
-⏰ Time: ${new Date().toLocaleString()}
-  `);
-});
-
-// Export for Vercel
-module.exports = app;
+// ----------------- Start Server -----------------
+app.listen(PORT, () =>
+  console.log(`🚀 VenTech server running at http://localhost:${PORT}`)
+);
 
