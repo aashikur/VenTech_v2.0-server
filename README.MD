@@ -213,5 +213,5 @@ Use Firebase client SDK in your frontend to get the token after login.
 
 ## 👨‍💻 Author
 
-**VenTech Backend** – built with ❤️ by [Your Name](https://github.com/your-username)
+**VenTech Backend** – built with ❤️ by [Ashikur Rahaman](https://github.com/aashikur)
 
