@@ -931,13 +931,22 @@ app.get("/api/v1/request-list", async (req, res) => {
 });
 
 
+// ----------------- Get All Single Request by ID -----------------
 
 
 
-
-
-
-
+// -- Get Order by ID (GET)
+app.get("/api/v1/get-order-byID/:id", async( req, res) => {
+  try{
+    const {id} = req.params;
+    console.log(req.params)
+    const order = await Order.findById(id);
+    res.json(order);
+  } catch (err) {
+    console.error("Failed to fetch order:", err.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 
 
 
