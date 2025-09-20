@@ -948,6 +948,18 @@ app.get("/api/v1/get-order-byID/:id", async( req, res) => {
   }
 });
 
+//-- Delete Order by ID (DELETE)
+app.delete("/api/v1/cancel-orders/:id", async (req, res) => {
+  try {
+    const {id } = req.params;
+    const order = await Order.findByIdAndDelete(id);
+    res.status(200).send({message: "Order cancelled successfully" });
+  }
+   catch (err) {
+    console.error("Failed to cancel order:", err.message);
+    res.status(500).json({ success: false, message: "Server error" });
+   }
+});
 
 
 // ----------------- Error Handler -----------------
