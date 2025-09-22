@@ -143,6 +143,7 @@ const ShopDetailsSchema = new Schema(
     shopNumber: { type: String, trim: true },
     shopAddress: { type: String, trim: true },
     tradeLicense: { type: String, trim: true },
+
   },
   { _id: false }
 );
@@ -314,6 +315,7 @@ app.post("/api/v1/auth/request-merchant", requireAuth, async (req, res) => {
 
     // Only set roleRequest for merchant
     user.roleRequest = { type: "merchant", status: "pending", requestedAt: new Date() };
+    
     
     // Optionally keep account active while waiting
     user.status = "active";
@@ -961,6 +963,21 @@ app.delete("/api/v1/cancel-orders/:id", async (req, res) => {
    }
 });
 
+
+// Cencel-request by ID (delete) ~ Merchant 
+app.delete("/api/v1/merchant/cancel-request/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const request = await RequestList.findByIdAndDelete(id);
+    res.status(200).send({message: "Request cancelled successfully" });
+    console.log("😆", req.params)
+  } catch (err) {
+    console.error("Failed to cancel request:", err.message);
+    res.status(500).json({ success: false, message: "Server error" });
+    console.log("😆😆", req.params)
+
+  }
+})
 
 // ----------------- Error Handler -----------------
 app.use((err, _req, res, _next) => {
