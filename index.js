@@ -979,6 +979,23 @@ app.delete("/api/v1/merchant/cancel-request/:id", async (req, res) => {
   }
 })
 
+// -- Get Request by ID (GET)
+app.get("/api/v1/get-request-byID/:id", async( req, res) => {
+  try{
+    const { id } = req.params;
+    const request = await RequestList.findById(id);
+    if (!request) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+    res.status(200).json({ success: true, data: request });
+  } catch (err) {
+    console.error("Failed to fetch request:", err.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+
+
 // ----------------- Error Handler -----------------
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err);
