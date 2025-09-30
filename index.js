@@ -1006,12 +1006,6 @@ app.get("/api/v1/get-request-byID/:id", async( req, res) => {
 
 
 
-// ----------------- CORS -----------------
-app.use(cors());
-
-// ----------------- Body Parser -----------------
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 
 // ----------------- Error Handler -----------------
